@@ -1,79 +1,112 @@
-package com.games.minigolf
+package composables
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.games.minigolf.ui.theme.MiniGolfTheme
-import logic.GameState
-import logic.reiniciarHoyo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import composables.PantallaInicio
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import logic.GameState
 import logic.SwingDetector
 import logic.calcDireccion
+import logic.calcMagnitud
 import logic.calcularPosicionFinal
 import logic.registrarGolpe
-import logic.reiniciarHoyo
-import logic.calcMagnitud
-import logic.posicionesParaNivel
-import composables.MiniGolfApp
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            MiniGolfTheme {
-                MiniGolfApp()
-            }
-        }
-    }
-}
 
-data class GameState(
-    val hoyoActual: Int,        // en qué hoyo va (1, 2, 3)
-    val par: Int,               // el par de ese hoyo
-    val golpes: Int,            // cuántos golpes lleva
-    val posicionBola: Offset,   // dónde está la bola en pantalla (x, y)
-    val posicionHoyo: Offset,   // dónde está el hoyo en pantalla (x, y)
-    val hoyoCompletado: Boolean // si ya metió la bola
-)
-val gameStateFalso = GameState(
-    hoyoActual = 1,
-    par = 3,
-    golpes = 0,
-    posicionBola = Offset(200f, 400f),
-    posicionHoyo = Offset(200f, 100f),
-    hoyoCompletado = false
-)
 
 @Composable
 fun PantallaJuego(
     gameState: GameState,
+    onGameStateChange: (GameState) -> Unit,
     onReiniciar: () -> Unit,
     onVolver: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    val sensorManager = remember {
+        context.getSystemService(SensorManager::class.java)
+    }
+    var ultimaMagnitud by remember { mutableFloatStateOf(0f) }
+    var ultimoAngulo by remember { mutableFloatStateOf(0f) }
+    val swingDetector = remember { SwingDetector() }
+    val estadoActual = rememberUpdatedState(gameState)
+
+
+    DisposableEffect(sensorManager) {
+
+        val listener = object : SensorEventListener {
+
+            override fun onSensorChanged(event: SensorEvent) {
+                if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                    val ax = event.values[0]
+                    val ay = event.values[1]
+                    val az = event.values[2]
+
+                    swingDetector.actualizarApuntado(ax, ay)
+
+                    val resultado = swingDetector.procesarLectura(
+                        ax, ay, az,
+                        timestampMs = System.currentTimeMillis()
+                    )
+
+                    ultimaMagnitud = calcMagnitud(ax, ay, az)
+                    ultimoAngulo = Math.toDegrees(calcDireccion(ax, ay).toDouble()).toFloat()
+                    val estado = estadoActual.value
+
+                    if (resultado != null && !estado.hoyoCompletado) {
+                        val nuevaPosicion = calcularPosicionFinal(
+                            origen = estado.posicionBola,
+                            fuerza = resultado.fuerza,
+                            direccionRad = resultado.direccionRad
+                        )
+                        onGameStateChange(registrarGolpe(estado, nuevaPosicion))
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        sensorManager.registerListener(
+            listener,
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            SensorManager.SENSOR_DELAY_GAME
+        )
+
+        onDispose {
+            sensorManager.unregisterListener(listener)
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFFE8F5E9)
@@ -108,7 +141,11 @@ fun PantallaJuego(
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
-
+            Text(
+                text = "Debug: mag=%.1f, ang=%.0f°".format(ultimaMagnitud, ultimoAngulo),
+                fontSize = 14.sp,
+                color = Color.Gray
+            )
             Spacer(modifier = Modifier.height(15.dp))
 
             Box(
@@ -124,7 +161,7 @@ fun PantallaJuego(
                 ) {
                     drawCircle(
                         color = Color.Black,
-                        radius = 30f,
+                        radius = 50f,
                         center = gameState.posicionHoyo
                     )
 
@@ -159,6 +196,7 @@ fun PantallaJuego(
             }
 
             if (gameState.hoyoCompletado) {
+                Spacer(modifier = Modifier.height(15.dp))
                 Text(
                     text = "¡HOYO COMPLETADO!",
                     fontSize = 20.sp,
@@ -167,15 +205,5 @@ fun PantallaJuego(
                 )
             }
         }
-    }
-}
-@Preview(showBackground = true)
-@Composable
-fun InicioPreview() {
-
-    MiniGolfTheme {
-        PantallaInicio(
-            onJugar = {}
-        )
     }
 }

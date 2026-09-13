@@ -22,9 +22,16 @@ fun calcularPosicionFinal(
     val destinoY = origen.y + distancia * sin(direccionRad)
     return Offset(destinoX, destinoY)
 }
-fun llegoAlHoyo(posBola: Offset, posHoyo: Offset, radioHoyo: Float = 40f): Boolean {
+fun llegoAlHoyo(posBola: Offset, posHoyo: Offset, radioHoyo: Float = 50f): Boolean {
     val dx = posBola.x - posHoyo.x
     val dy = posBola.y - posHoyo.y
     val distancia = sqrt(dx * dx + dy * dy)
     return distancia <= radioHoyo
+}
+fun posicionesParaNivel(nivel: Int): Pair<Offset, Offset> {
+    return when (nivel) {
+        1 -> Offset(200f, 400f) to Offset(200f, 100f)
+        2 -> Offset(100f, 500f) to Offset(300f, 80f)
+        else -> Offset(300f, 550f) to Offset(150f, 60f)
+    }
 }
